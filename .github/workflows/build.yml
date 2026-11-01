@@ -2,8 +2,13 @@ name: Build APK
 
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write   # needed to publish the release with APKs
 
 jobs:
   build:
@@ -19,11 +24,23 @@ jobs:
         run: ./gradlew testMobileDebugUnitTest
       - name: Build release APKs
         run: ./gradlew assembleTvRelease assembleMobileRelease
+      - name: Rename APKs
+        run: |
+          VER="${GITHUB_REF_NAME//\//-}"
+          mkdir -p dist
+          cp app/build/outputs/apk/tv/release/*.apk "dist/Tormeo-TV-armeabi-v7a-$VER.apk"
+          cp app/build/outputs/apk/mobile/release/*.apk "dist/Tormeo-Mobile-$VER.apk"
+          ls -la dist
       - uses: actions/upload-artifact@v4
         with:
-          name: tormeo-tv-armeabi-v7a
-          path: app/build/outputs/apk/tv/release/*.apk
-      - uses: actions/upload-artifact@v4
+          name: tormeo-apks
+          path: dist/*.apk
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
         with:
-          name: tormeo-mobile
-          path: app/build/outputs/apk/mobile/release/*.apk
+          files: dist/*.apk
+          generate_release_notes: true
+          body: |
+            **Tormeo-TV-armeabi-v7a** – Android TV / TV boksovi (Android 6.0+)
+            **Tormeo-Mobile** – telefoni i tableti (Android 6.0+)
