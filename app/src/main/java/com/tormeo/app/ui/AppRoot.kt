@@ -1,0 +1,57 @@
+package com.tormeo.app.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.ui.Modifier
+
+/** Minimal back-stack navigation (no extra navigation library – keeps the APK small). */
+sealed class Screen(val key: String) {
+    data object Home : Screen("home")
+    data object Search : Screen("search")
+    data object Settings : Screen("settings")
+    data class Detail(val type: String, val id: String, val name: String, val poster: String?) : Screen("detail/$type/$id")
+    data class Streams(
+        val type: String,
+        val metaId: String,
+        val videoId: String,
+        val title: String,
+        val subtitle: String?,
+        val poster: String?,
+        val runtimeMinutes: Int?,
+        val autoPlay: Boolean,
+    ) : Screen("streams/$videoId/$autoPlay")
+}
+
+class Navigator(private val stack: MutableList<Screen>) {
+    val current: Screen get() = stack.last()
+    val canGoBack: Boolean get() = stack.size > 1
+    fun go(s: Screen) { stack.add(s) }
+    fun back() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
+}
+
+@Composable
+fun AppRoot() {
+    val stack = remember { mutableStateListOf<Screen>(Screen.Home) }
+    val nav = remember { Navigator(stack) }
+    val holder = rememberSaveableStateHolder()
+    BackHandler(enabled = stack.size > 1) { nav.back() }
+
+    Box(Modifier.fillMaxSize().background(Bg)) {
+        val screen = stack.last()
+        holder.SaveableStateProvider(screen.key) {
+            when (screen) {
+                Screen.Home -> HomeScreen(nav)
+                Screen.Search -> SearchScreen(nav)
+                Screen.Settings -> SettingsScreen()
+                is Screen.Detail -> DetailScreen(nav, screen)
+                is Screen.Streams -> StreamsScreen(screen)
+            }
+        }
+    }
+}

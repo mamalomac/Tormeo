@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "TORMEO" wordmark made of simple strokes -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="150dp" android:height="40dp" android:viewportWidth="150" android:viewportHeight="40">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M4,6 H22 M13,6 V34
+        M30,6 h14 v28 h-14 z
+        M52,34 V6 h12 a7,7 0 0 1 0,14 h-12 M62,20 L68,34
+        M76,34 V6 L86,22 L96,6 V34
+        M118,6 H104 V34 H118 M104,20 H115
+        M126,6 h18 v28 h-18 z" />
+</vector>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 Android TV launcher banner -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:angle="0" android:startColor="#FF0E0F13" android:endColor="#FF2A1F66" />
+            <size android:width="320dp" android:height="180dp" />
+        </shape>
+    </item>
+    <item android:drawable="@drawable/ic_launcher" android:gravity="center_vertical|left" android:left="24dp" android:width="120dp" android:height="120dp" />
+    <item android:drawable="@drawable/banner_text" android:gravity="center_vertical|right" android:right="24dp" android:width="150dp" android:height="40dp" />
+</layer-list>
