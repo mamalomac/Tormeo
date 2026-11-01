@@ -16,6 +16,7 @@ import com.tormeo.app.data.Settings
 import com.tormeo.app.data.WatchProgressStore
 import com.tormeo.app.device.DeviceCaps
 import com.tormeo.app.torrent.StreamServer
+import com.tormeo.app.torrent.TorrentConfig
 import com.tormeo.app.torrent.TorrentEngine
 import okhttp3.Cache
 import okhttp3.OkHttpClient
@@ -42,7 +43,11 @@ class TormeoApp : Application() {
     }
 
     val deviceCaps: DeviceCaps by lazy { DeviceCaps.detect(this) }
-    val torrentEngine: TorrentEngine by lazy { TorrentEngine(this, settings) }
+    val torrentEngine: TorrentEngine by lazy {
+        TorrentEngine(File(getExternalFilesDir(null) ?: filesDir, "torrents")) {
+            TorrentConfig(settings.maxConnections, settings.uploadLimitKb, settings.torrentAheadMb, settings.keepCache)
+        }
+    }
     val streamServer: StreamServer by lazy { StreamServer().also { it.start() } }
 
     override fun onCreate() {

@@ -106,7 +106,10 @@ class StreamServer {
                 if (partial) sb.append("Content-Range: bytes ").append(start).append('-').append(end).append('/').append(total).append("\r\n")
                 sb.append("Connection: close\r\n\r\n")
                 out.write(sb.toString().toByteArray())
-                if (method == "HEAD") { out.flush(); return }
+                // Send headers right away: the player's "open" succeeds even while pieces are still downloading,
+                // and any later problem surfaces as a read error (which the player retries) instead of a dead connection.
+                out.flush()
+                if (method == "HEAD") return
 
                 // Newest request for a source wins: a reader stuck waiting on an old position gives up.
                 val reqNo = entry.latestRequest.incrementAndGet()
@@ -124,7 +127,9 @@ class StreamServer {
                 }
                 out.flush()
             } catch (e: IOException) {
-                // client closed the connection (seek / stop) – normal
+                // usually the client closed the connection (seek / stop) – log anything else
+                val m = e.message.orEmpty()
+                if ("cancelled" !in m && "closed" !in m && "Broken pipe" !in m && "reset" !in m) Log.w(TAG, "stream read failed", e)
             } catch (e: Exception) {
                 Log.w(TAG, "stream error", e)
             }

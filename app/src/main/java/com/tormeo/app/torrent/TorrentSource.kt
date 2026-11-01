@@ -5,6 +5,7 @@ import org.libtorrent4j.Priority
 import org.libtorrent4j.TorrentHandle
 import org.libtorrent4j.TorrentInfo
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.RandomAccessFile
 
@@ -103,11 +104,22 @@ class TorrentSource internal constructor(
         val pieceEndInFile = (p + 1L) * pieceLen - fileOffset
         val n = minOf(len.toLong(), minOf(pieceEndInFile, length) - pos).toInt()
         synchronized(rafLock) {
-            val f = raf ?: RandomAccessFile(path, "r").also { raf = it }
+            val f = raf ?: openFile(cancelled).also { raf = it }
             f.seek(pos)
             f.readFully(buf, off, n)
         }
         return n
+    }
+
+    /** The file appears on disk shortly after its first piece is written – wait a little if needed. */
+    private fun openFile(cancelled: () -> Boolean): RandomAccessFile {
+        var waited = 0
+        while (true) {
+            if (path.exists()) return RandomAccessFile(path, "r")
+            if (closed || cancelled() || waited >= 10_000) throw FileNotFoundException("Torrent fajl nije na disku: $path")
+            Thread.sleep(100)
+            waited += 100
+        }
     }
 
     override fun availableFrom(pos: Long): Long {

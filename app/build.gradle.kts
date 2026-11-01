@@ -16,8 +16,8 @@ android {
         applicationId = "com.tormeo.app"
         minSdk = 23            // Android 6.0 – covers old TV boxes
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     flavorDimensions += "device"
@@ -104,4 +104,5 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.libtorrent4j:libtorrent4j-linux:$libtorrent4j") // desktop native lib for the torrent streaming test
 }

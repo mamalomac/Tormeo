@@ -1,10 +1,9 @@
 package com.tormeo.app.torrent
 
-import android.content.Context
 import android.util.Log
-import com.tormeo.app.data.Settings
 import kotlinx.coroutines.delay
 import org.libtorrent4j.AlertListener
+import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionHandle
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SessionParams
@@ -26,14 +25,25 @@ data class TorrentStatus(
     val hasMetadata: Boolean,
 )
 
+/** Engine settings, read fresh for every playback. */
+data class TorrentConfig(
+    val maxConnections: Int = 150,
+    val uploadLimitKb: Int = 0,
+    val aheadMb: Int = 1024,
+    val keepCache: Boolean = false,
+    /** e.g. "0.0.0.0:6881" – null keeps the libtorrent default. */
+    val listenInterfaces: String? = null,
+)
+
 /**
  * libtorrent session tuned for streaming on weak devices.
  * One session for the whole app; torrents are added per playback and removed afterwards.
  */
-class TorrentEngine(context: Context, private val settings: Settings) {
+class TorrentEngine(private val saveRoot: File, private val config: () -> TorrentConfig) {
 
     private val sm = SessionManager(false)
-    private val saveRoot = File(context.getExternalFilesDir(null) ?: context.filesDir, "torrents").apply { mkdirs() }
+
+    init { saveRoot.mkdirs() }
     @Volatile private var started = false
 
     /** Notified whenever any piece finishes, so blocked readers wake up immediately. */
@@ -51,12 +61,14 @@ class TorrentEngine(context: Context, private val settings: Settings) {
     @Synchronized
     private fun ensureStarted() {
         if (started) return
+        val cfg = config()
         val sp = SettingsPack()
-            .connectionsLimit(settings.maxConnections)
+            .connectionsLimit(cfg.maxConnections)
             .activeDownloads(3)
             .activeSeeds(3)
             .activeLimit(6)
-            .uploadRateLimit(settings.uploadLimitKb * 1024)
+            .uploadRateLimit(cfg.uploadLimitKb * 1024)
+        cfg.listenInterfaces?.let { sp.listenInterfaces(it) }
         sp.setEnableDht(true)
         sp.setEnableLsd(true)
         sp.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true)
@@ -94,6 +106,7 @@ class TorrentEngine(context: Context, private val settings: Settings) {
         sources: List<String>?,
         filenameHint: String?,
         bitrateBps: Long?,
+        extraPeers: List<String> = emptyList(),
         onStatus: (TorrentStatus) -> Unit,
     ): TorrentSource {
         ensureStarted()
@@ -103,6 +116,7 @@ class TorrentEngine(context: Context, private val settings: Settings) {
         val magnet = buildString {
             append("magnet:?xt=urn:btih:").append(hash)
             for (t in trackers) append("&tr=").append(java.net.URLEncoder.encode(t, "UTF-8"))
+            for (p in extraPeers) append("&x.pe=").append(p)
         }
         val dir = File(saveRoot, hash).apply { mkdirs() }
         sm.download(magnet, dir, TorrentFlags.DEFAULT_DONT_DOWNLOAD)
@@ -133,8 +147,12 @@ class TorrentEngine(context: Context, private val settings: Settings) {
         } ?: (0 until fs.numFiles()).filter { isVideo(it) }.maxByOrNull { fs.fileSize(it) }
             ?: (0 until fs.numFiles()).maxBy { fs.fileSize(it) }
 
+        // The chosen file MUST have a non-zero *file* priority: libtorrent stores data of priority-0 files
+        // in a hidden ".parts" file instead of the real file, so it would never appear on disk.
+        // (Piece priorities set later by TorrentSource still control what actually gets downloaded.)
+        handle.prioritizeFiles(Array(fs.numFiles()) { if (it == idx) Priority.DEFAULT else Priority.IGNORE })
         handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
-        val aheadBytes = minOf(settings.torrentAheadMb.toLong() shl 20, (freeSpace * 0.7).toLong())
+        val aheadBytes = minOf(config().aheadMb.toLong() shl 20, (freeSpace * 0.7).toLong())
             .coerceAtLeast(64L shl 20)
         return TorrentSource(this, handle, ti, idx, bitrateBps, aheadBytes)
     }
@@ -147,7 +165,7 @@ class TorrentEngine(context: Context, private val settings: Settings) {
     fun release(th: TorrentHandle) {
         try {
             if (th.isValid) {
-                if (settings.keepCache) sm.remove(th) else sm.remove(th, SessionHandle.DELETE_FILES)
+                if (config().keepCache) sm.remove(th) else sm.remove(th, SessionHandle.DELETE_FILES)
             }
         } catch (e: Exception) {
             Log.w("TorrentEngine", "remove failed", e)
