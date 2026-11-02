@@ -27,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -57,11 +58,13 @@ fun HomeScreen(nav: Navigator) {
     ) {
         item("top") {
             Row(Modifier.fillMaxWidth().padding(hPad).padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Tormeo", fontSize = 26.sp, fontWeight = FontWeight.Black, color = Accent)
+                // narrow phones: short labels so the top bar fits on one line
+                val compact = !app.isTv && LocalConfiguration.current.screenWidthDp < 600
+                Text("Tormeo", fontSize = if (compact) 24.sp else 26.sp, fontWeight = FontWeight.Black, color = Accent, maxLines = 1)
                 Spacer(Modifier.weight(1f))
-                TvButton("Pretraga", requestFocus = lastFocused == null) { nav.go(Screen.Search) }
-                Spacer(Modifier.width(10.dp))
-                TvButton("Podešavanja") { nav.go(Screen.Settings) }
+                TvButton(if (compact) "🔍 Traži" else "Pretraga", requestFocus = lastFocused == null) { nav.go(Screen.Search) }
+                Spacer(Modifier.width(8.dp))
+                TvButton(if (compact) "⚙" else "Podešavanja") { nav.go(Screen.Settings) }
             }
         }
         if (addons.isEmpty()) {

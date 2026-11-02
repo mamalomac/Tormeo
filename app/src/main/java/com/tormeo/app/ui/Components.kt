@@ -104,6 +104,8 @@ fun TvButton(
             color = if (focused) Bg else Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 15.sp,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier
                 .background(if (focused) Color.White else if (primary) Accent else Surface2)
                 .padding(horizontal = 20.dp, vertical = 10.dp),

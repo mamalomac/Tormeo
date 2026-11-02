@@ -106,13 +106,13 @@ fun StreamsScreen(s: Screen.Streams) {
         Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (responded < targets) {
                 CircularProgressIndicator(Modifier.padding(end = 10.dp).width(18.dp), strokeWidth = 2.dp)
-                Text("Tražim izvore… ($responded/$targets addona)", color = TextDim, fontSize = 13.sp)
+                Text("Tražim izvore… ($responded/$targets)", color = TextDim, fontSize = 13.sp, modifier = Modifier.weight(1f))
             } else {
-                Text("${visible.size} izvora", color = TextDim, fontSize = 13.sp)
+                Text("${visible.size} izvora", color = TextDim, fontSize = 13.sp, modifier = Modifier.weight(1f))
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
             if (hidden > 0 || showAll) {
-                TvButton(if (showAll) "Sakrij nekompatibilne" else "Prikaži sve (+$hidden)") { showAll = !showAll }
+                TvButton(if (showAll) "Sakrij loše" else "Prikaži sve (+$hidden)") { showAll = !showAll }
             }
         }
         if (!autoPlayDone) {

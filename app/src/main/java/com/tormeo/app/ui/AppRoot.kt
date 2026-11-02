@@ -3,7 +3,13 @@ package com.tormeo.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.getValue
@@ -48,15 +54,22 @@ fun AppRoot() {
     var crashReport by remember { mutableStateOf(Diagnostics.takePendingReport()) }
     crashReport?.let { CrashReportDialog(it) { crashReport = null } }
 
-    Box(Modifier.fillMaxSize().background(Bg)) {
-        val screen = stack.last()
-        holder.SaveableStateProvider(screen.key) {
-            when (screen) {
-                Screen.Home -> HomeScreen(nav)
-                Screen.Search -> SearchScreen(nav)
-                Screen.Settings -> SettingsScreen()
-                is Screen.Detail -> DetailScreen(nav, screen)
-                is Screen.Streams -> StreamsScreen(screen)
+    // White default text color (otherwise Text falls back to black on our dark background)
+    CompositionLocalProvider(LocalContentColor provides Color.White) {
+        Box(
+            Modifier.fillMaxSize().background(Bg)
+                // keep content clear of the status bar, navigation bar, display cutout and keyboard
+                .windowInsetsPadding(WindowInsets.safeDrawing),
+        ) {
+            val screen = stack.last()
+            holder.SaveableStateProvider(screen.key) {
+                when (screen) {
+                    Screen.Home -> HomeScreen(nav)
+                    Screen.Search -> SearchScreen(nav)
+                    Screen.Settings -> SettingsScreen()
+                    is Screen.Detail -> DetailScreen(nav, screen)
+                    is Screen.Streams -> StreamsScreen(screen)
+                }
             }
         }
     }
