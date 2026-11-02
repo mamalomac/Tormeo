@@ -123,7 +123,7 @@ object Subtitles {
 
     /** Decodes (UTF-8, else Windows-1250/1251), detects the format and converts MicroDVD to SRT. */
     fun normalize(bytes: ByteArray, fps: Float): Pair<String, String> {
-        var text = decode(bytes).removePrefix("﻿")
+        var text = decode(bytes).removePrefix("\uFEFF")
         val head = text.trimStart()
         val mime = when {
             head.startsWith("WEBVTT") -> MimeTypes.TEXT_VTT
