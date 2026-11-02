@@ -16,8 +16,8 @@ android {
         applicationId = "com.tormeo.app"
         minSdk = 23            // Android 6.0 – covers old TV boxes
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     flavorDimensions += "device"

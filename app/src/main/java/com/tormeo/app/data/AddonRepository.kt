@@ -136,10 +136,15 @@ class AddonRepository(context: Context, private val http: OkHttpClient) {
         return res
     }
 
-    /** Searches all searchable catalogs in parallel; returns movies first, then series. */
-    suspend fun search(query: String): List<MetaPreview> = coroutineScope {
-        searchCatalogs().map { ref -> async { runCatching { catalog(ref, mapOf("search" to query)) }.getOrDefault(emptyList()) } }
-            .awaitAll().flatten().distinctBy { it.type + it.id }
+    /**
+     * Searches all searchable catalogs in parallel.
+     * Returns one row per type (series first, then movies, then anything else), each ordered by relevance.
+     */
+    suspend fun search(query: String): List<Pair<String, List<MetaPreview>>> = coroutineScope {
+        val perCatalog = searchCatalogs().map { ref ->
+            async { runCatching { catalog(ref, mapOf("search" to query)) }.getOrDefault(emptyList()) }
+        }.awaitAll()
+        SearchRanking.byType(query, perCatalog)
     }
 
     // ---------------------------------------------------------------- meta

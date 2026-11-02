@@ -2,12 +2,13 @@ package com.tormeo.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
@@ -33,7 +34,7 @@ import kotlinx.coroutines.delay
 fun SearchScreen(nav: Navigator) {
     val repo = TormeoApp.instance.addons
     var query by rememberSaveable { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<MetaPreview>?>(null) }
+    var results by remember { mutableStateOf<List<Pair<String, List<MetaPreview>>>?>(null) }
     var loading by remember { mutableStateOf(false) }
     val fr = remember { FocusRequester() }
     val kb = LocalSoftwareKeyboardController.current
@@ -62,18 +63,29 @@ fun SearchScreen(nav: Navigator) {
             loading && r == null -> CenterMessage("Tražim…")
             r == null -> CenterMessage("Unesi bar 2 slova")
             r.isEmpty() -> CenterMessage("Nema rezultata")
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(posterWidth() + 14.dp),
-                modifier = Modifier.padding(top = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                items(r, key = { it.type + it.id }) { m ->
-                    Poster(m.name, m.poster, subtitle = listOfNotNull(m.releaseInfo, if (m.type == "series") "serija" else null).joinToString(" · ")) {
-                        nav.go(Screen.Detail(m.type, m.id, m.name, m.poster))
+            else -> LazyColumn(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(r, key = { it.first }) { (type, list) ->
+                    Column {
+                        SectionTitle("${typeLabel(type)} (${list.size})")
+                        LazyRow(contentPadding = PaddingValues(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            items(list, key = { it.type + it.id }) { m ->
+                                Poster(m.name, m.poster, subtitle = m.releaseInfo) {
+                                    kb?.hide()
+                                    nav.go(Screen.Detail(m.type, m.id, m.name, m.poster))
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private fun typeLabel(type: String) = when (type) {
+    "series" -> "Serije"
+    "movie" -> "Filmovi"
+    "channel" -> "Kanali"
+    "tv" -> "TV"
+    else -> type.replaceFirstChar { it.uppercase() }
 }
