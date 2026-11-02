@@ -112,7 +112,12 @@ fun SettingsScreen() {
                 SwitchRow("Uskladi frekvenciju ekrana", "Prebacuje TV na 23.976/24/25/50/60 Hz (i 4K) prema filmu – bez trzanja", st.matchFrameRate) { st.matchFrameRate = it; changed() }
                 SwitchRow("Softverski audio (ffmpeg)", "Za DTS / TrueHD / E-AC3 kada uređaj nema dekoder", st.ffmpegAudio) { st.ffmpegAudio = it; changed() }
                 ValueRow("Jezik zvuka", langLabel(st.audioLang)) { st.audioLang = cycle(LANGS, st.audioLang); changed() }
-                ValueRow("Jezik titla", langLabel(st.subLang)) { st.subLang = cycle(LANGS, st.subLang); changed() }
+                ValueRow(
+                    "Titlovi (OpenSubtitles)",
+                    if (st.subLang.isEmpty()) "ručno" else langLabel(st.subLang),
+                    if (st.subLang.isEmpty()) "Biraš titl u plejeru (CC Titlovi / taster MENU)"
+                    else "Automatski učitava titl na ovom jeziku (srpski ↔ hrvatski ↔ bosanski, pa engleski)",
+                ) { st.subLang = cycle(LANGS, st.subLang); changed() }
             }
         }
 

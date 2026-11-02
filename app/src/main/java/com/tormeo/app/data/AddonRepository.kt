@@ -63,6 +63,11 @@ class AddonRepository(context: Context, private val http: OkHttpClient) {
         } else {
             refreshManifests()
         }
+        // added in 1.4 – install once for existing users too
+        if (!prefs.getBoolean("subs_addon_added", false)) {
+            if (_addons.value.none { it.manifest.supports("subtitles", "movie", "tt1") }) runCatching { install(OPENSUBTITLES) }
+            if (_addons.value.any { it.manifest.supports("subtitles", "movie", "tt1") }) prefs.edit().putBoolean("subs_addon_added", true).apply()
+        }
     }
 
     private suspend fun refreshManifests() = coroutineScope {
@@ -175,6 +180,24 @@ class AddonRepository(context: Context, private val http: OkHttpClient) {
         awaitClose { }
     }
 
+    // ---------------------------------------------------------------- subtitles
+
+    /** Subtitles from every addon that serves them (OpenSubtitles v3 by default), queried in parallel. */
+    suspend fun subtitles(type: String, videoId: String, filename: String?, videoSize: Long?): List<Pair<String, Subtitle>> = coroutineScope {
+        val extra = buildList {
+            filename?.let { add("filename=${enc(it)}") }
+            videoSize?.let { add("videoSize=$it") }
+        }.joinToString("&").let { if (it.isEmpty()) "" else "/$it" }
+        _addons.value.filter { it.manifest.supports("subtitles", type, videoId) }.map { a ->
+            async {
+                runCatching {
+                    val body = withTimeoutOrNull(12_000) { get("${a.base}/subtitles/$type/${enc(videoId)}$extra.json") } ?: return@runCatching emptyList()
+                    StremioJson.decodeFromString(SubtitlesResponse.serializer(), body).subtitles.map { a.manifest.name to it }
+                }.getOrDefault(emptyList())
+            }
+        }.awaitAll().flatten()
+    }
+
     // ---------------------------------------------------------------- http
 
     private suspend fun get(url: String): String = withContext(Dispatchers.IO) {
@@ -188,7 +211,9 @@ class AddonRepository(context: Context, private val http: OkHttpClient) {
         val DEFAULT_ADDONS = listOf(
             "https://v3-cinemeta.strem.io/manifest.json",
             "https://torrentio.strem.fun/manifest.json",
+            OPENSUBTITLES,
         )
+        const val OPENSUBTITLES = "https://opensubtitles-v3.strem.io/manifest.json"
 
         fun enc(s: String): String = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 

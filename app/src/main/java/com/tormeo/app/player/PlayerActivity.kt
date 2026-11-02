@@ -1,7 +1,12 @@
 package com.tormeo.app.player
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
+import android.net.Uri
 import android.content.Intent
 import android.graphics.Color
 import android.os.Build
@@ -30,6 +35,8 @@ import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.ParserException
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -42,22 +49,31 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import com.tormeo.app.TormeoApp
 import com.tormeo.app.data.PlayRequest
 import com.tormeo.app.data.StremioJson
+import com.tormeo.app.data.Subtitle
 import com.tormeo.app.diag.Diagnostics
+import com.tormeo.app.subs.SubtitleOption
+import com.tormeo.app.subs.Subtitles
 import com.tormeo.app.torrent.ByteSource
 import com.tormeo.app.torrent.HttpSource
 import com.tormeo.app.torrent.TorrentSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.util.Locale
 import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
@@ -84,6 +100,18 @@ class PlayerActivity : ComponentActivity() {
     private var errorShown = false
     private var resumeFrom = 0L
     private var ioRetries = 0
+
+    // subtitles
+    private lateinit var subsButton: TextView
+    private var playUrl: String? = null
+    private var subsFetch: Deferred<List<Pair<String, Subtitle>>>? = null
+    private var activeSub: Pair<SubtitleOption, Subtitles.Prepared>? = null
+    private var pendingSubSelect = false
+    private var subDroppedAfterError = false
+    private val subsDir by lazy { File(cacheDir, "subs") }
+    /** Language order for listing: the setting, else the device language. */
+    private val subLangOrder: List<String>
+        get() = Subtitles.preferredLangs(app.settings.subLang.ifEmpty { Locale.getDefault().language })
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -175,6 +203,36 @@ class PlayerActivity : ComponentActivity() {
             visibility = View.GONE
         }
         root.addView(bufferText)
+
+        // Readable subtitles on any background: white text with a black outline, a bit larger on TV.
+        playerView.subtitleView?.apply {
+            setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.BLACK, null))
+            setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * if (app.isTv) 1.15f else 1.05f)
+        }
+
+        subsButton = TextView(this).apply {
+            text = "CC  Titlovi"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+            val focusedBg = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(Color.WHITE) }
+            val normalBg = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(0xCC22252D.toInt()) }
+            background = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), focusedBg)
+                addState(intArrayOf(android.R.attr.state_pressed), focusedBg)
+                addState(intArrayOf(), normalBg)
+            }
+            setTextColor(ColorStateList(arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()), intArrayOf(Color.BLACK, Color.WHITE)))
+            isFocusable = true
+            isClickable = true
+            setOnClickListener { showSubtitleDialog() }
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.START).apply { setMargins(dp(24), dp(24), dp(24), dp(24)) }
+            visibility = View.GONE
+        }
+        root.addView(subsButton)
+        playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
+            subsButton.visibility = if (player != null) v else View.GONE
+        })
         setContentView(root)
     }
 
@@ -200,6 +258,13 @@ class PlayerActivity : ComponentActivity() {
         errorShown = false
         progressBar.visibility = View.VISIBLE
         overlay.visibility = View.VISIBLE
+        subsDir.listFiles()?.forEach { it.delete() }
+        if (subsFetch == null) {
+            subsFetch = lifecycleScope.async(Dispatchers.IO) {
+                runCatching { app.addons.subtitles(req.type, req.videoId, req.filename, req.sizeBytes) }.getOrDefault(emptyList())
+                    .also { Diagnostics.log("subtitles found: ${it.size}") }
+            }
+        }
         prepareJob = lifecycleScope.launch {
             try {
                 val src = withContext(Dispatchers.IO) { openSource() }
@@ -214,6 +279,7 @@ class PlayerActivity : ComponentActivity() {
                     headers = req.headers
                 }
                 Diagnostics.log("source ready (${src?.javaClass?.simpleName ?: "direct"}), length=${src?.length?.let { it shr 20 }}MB")
+                autoLoadSubtitle(src?.fileName ?: req.filename)
                 setStatus("Pokrećem plejer…")
                 startPlayer(url, headers, local = src != null)
             } catch (e: CancellationException) {
@@ -316,7 +382,8 @@ class PlayerActivity : ComponentActivity() {
         Diagnostics.log("player created: tunneling=${settings.tunneling && !triedWithoutTunneling} ffmpegAudio=${settings.ffmpegAudio} buffer=${caps.playerBufferBytes shr 20}MB local=$local")
         player = p
         playerView.player = p
-        p.setMediaItem(MediaItem.fromUri(url), resumeFrom)
+        playUrl = url
+        p.setMediaItem(buildMediaItem(url), resumeFrom)
         p.prepare()
         p.playWhenReady = true
         if (resumeFrom > 0) Toast.makeText(this, "Nastavljam od ${fmtTime(resumeFrom)}", Toast.LENGTH_SHORT).show()
@@ -350,11 +417,26 @@ class PlayerActivity : ComponentActivity() {
 
         override fun onTracksChanged(tracks: Tracks) {
             player?.videoFormat?.let { matchDisplayMode(it) }
+            if (pendingSubSelect) selectActiveSubtitle(tracks)
         }
 
         override fun onPlayerError(error: PlaybackException) {
             Diagnostics.log("player error ${error.errorCodeName}: ${error.message} / cause: ${error.cause}")
             val p = player ?: return
+            val parseProblem = error.cause is ParserException ||
+                error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED
+            if (parseProblem && activeSub != null && !subDroppedAfterError) {
+                // most likely the side-loaded subtitle is broken – drop it rather than stopping the movie
+                subDroppedAfterError = true
+                Diagnostics.log("dropping subtitle after parse error")
+                activeSub = null
+                val pos = p.currentPosition
+                playUrl?.let { p.setMediaItem(buildMediaItem(it), pos) }
+                p.prepare()
+                p.playWhenReady = true
+                Toast.makeText(this@PlayerActivity, "Titl nije ispravan – uklonjen", Toast.LENGTH_SHORT).show()
+                return
+            }
             val decoderProblem = error.errorCode in listOf(
                 PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
                 PlaybackException.ERROR_CODE_DECODING_FAILED,
@@ -428,6 +510,118 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    // ------------------------------------------------------------------ subtitles
+
+    private fun subLabel(o: SubtitleOption) = "${o.langLabel} · OpenSubtitles"
+
+    private fun buildMediaItem(url: String): MediaItem {
+        val b = MediaItem.Builder().setUri(url)
+        activeSub?.let { (opt, prep) ->
+            b.setSubtitleConfigurations(
+                listOf(
+                    MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(prep.file))
+                        .setMimeType(prep.mimeType)
+                        .setLanguage(opt.lang)
+                        .setLabel(subLabel(opt))
+                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                        .build(),
+                ),
+            )
+            pendingSubSelect = true
+        }
+        return b.build()
+    }
+
+    /** Called before playback: downloads the best subtitle in the preferred language (if one is set). */
+    private suspend fun autoLoadSubtitle(videoName: String?) {
+        val pref = Subtitles.preferredLangs(app.settings.subLang)
+        if (pref.isEmpty()) return
+        setStatus("Tražim titl…")
+        val raw = withTimeoutOrNull(6_000) { subsFetch?.await() } ?: return
+        val best = Subtitles.autoPick(Subtitles.rank(raw, pref, videoName, null), pref) ?: return
+        val prepared = withTimeoutOrNull(10_000) {
+            withContext(Dispatchers.IO) { runCatching { Subtitles.download(app.http, best, subsDir, null) }.getOrNull() }
+        } ?: return
+        activeSub = best to prepared
+        Diagnostics.log("subtitle auto: ${best.title} (${prepared.mimeType})")
+    }
+
+    /** Forces selection of our side-loaded subtitle (it may not match the preferred language exactly, e.g. hr for sr). */
+    private fun selectActiveSubtitle(tracks: Tracks) {
+        val p = player ?: return
+        val opt = activeSub?.first ?: run { pendingSubSelect = false; return }
+        val label = subLabel(opt)
+        for (g in tracks.groups) {
+            if (g.type != C.TRACK_TYPE_TEXT) continue
+            for (i in 0 until g.length) {
+                if (g.getTrackFormat(i).label == label) {
+                    pendingSubSelect = false
+                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i))
+                        .build()
+                    return
+                }
+            }
+        }
+    }
+
+    private fun showSubtitleDialog() {
+        lifecycleScope.launch {
+            val fetch = subsFetch
+            if (fetch == null || !fetch.isCompleted) Toast.makeText(this@PlayerActivity, "Tražim titlove…", Toast.LENGTH_SHORT).show()
+            val raw = withTimeoutOrNull(15_000) { fetch?.await() } ?: emptyList()
+            val p = player
+            val options = Subtitles.rank(raw, subLangOrder, source?.fileName ?: req.filename, p?.videoFormat?.frameRate).take(100)
+            if (options.isEmpty()) {
+                Toast.makeText(this@PlayerActivity, "Nema titlova za ovaj sadržaj", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val current = activeSub?.first?.sub?.url
+            val textOff = p?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true
+            val items = arrayOf((if (current == null || textOff) "● " else "") + "Bez titla") + options.map { o ->
+                val fps = o.sub.fpsMilli?.takeIf { it > 0 }?.let { "  [${"%.3f".format(Locale.US, it / 1000f).trimEnd('0').trimEnd('.')} fps]" } ?: ""
+                (if (o.sub.url == current && !textOff) "● " else "") + o.title + fps
+            }
+            AlertDialog.Builder(this@PlayerActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Titlovi · OpenSubtitles")
+                .setItems(items) { _, which -> if (which == 0) disableSubtitles() else applySubtitle(options[which - 1]) }
+                .setNegativeButton("Zatvori", null)
+                .show()
+        }
+    }
+
+    private fun disableSubtitles() {
+        val p = player ?: return
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+        Diagnostics.log("subtitles off")
+    }
+
+    private fun applySubtitle(opt: SubtitleOption) {
+        val p = player ?: return
+        val url = playUrl ?: return
+        lifecycleScope.launch {
+            Toast.makeText(this@PlayerActivity, "Učitavam titl…", Toast.LENGTH_SHORT).show()
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching { Subtitles.download(app.http, opt, subsDir, p.videoFormat?.frameRate) }
+            }.getOrElse {
+                Diagnostics.error("subtitle download", it)
+                Toast.makeText(this@PlayerActivity, "Titl nije dostupan: ${it.message}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            Diagnostics.log("subtitle chosen: ${opt.title} (${prepared.mimeType})")
+            activeSub = opt to prepared
+            subDroppedAfterError = false
+            val pos = p.currentPosition
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).clearOverridesOfType(C.TRACK_TYPE_TEXT).build()
+            // Side-loaded subtitles are part of the media item → re-prepare at the same position (data is already buffered).
+            p.setMediaItem(buildMediaItem(url), pos)
+            p.prepare()
+            p.playWhenReady = true
+        }
+    }
+
     private fun startTicker() {
         tickerJob?.cancel()
         tickerJob = lifecycleScope.launch {
@@ -470,6 +664,13 @@ class PlayerActivity : ComponentActivity() {
             retry()
             return true
         }
+        if (player != null && event.action == KeyEvent.ACTION_DOWN &&
+            (event.keyCode == KeyEvent.KEYCODE_CAPTIONS || event.keyCode == KeyEvent.KEYCODE_MENU)
+        ) {
+            showSubtitleDialog()
+            return true
+        }
+        if (currentFocus === subsButton) return super.dispatchKeyEvent(event)
         if (player != null && event.keyCode != KeyEvent.KEYCODE_BACK) {
             // OK / play-pause toggles playback when the controller is hidden (typical TV behaviour)
             if (!playerView.isControllerFullyVisible && event.action == KeyEvent.ACTION_DOWN &&

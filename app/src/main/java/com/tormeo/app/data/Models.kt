@@ -153,6 +153,20 @@ data class StreamHints(
 @Serializable
 data class ProxyHeaders(val request: Map<String, String>? = null)
 
+@Serializable
+data class Subtitle(
+    val id: String = "",
+    val url: String,
+    val lang: String = "",
+    val subtitleFileName: String? = null,
+    val movieReleaseName: String? = null,
+    val releaseFormat: String? = null,
+    val releaseOther: String? = null,
+    val fpsMilli: Int? = null,
+)
+
+@Serializable data class SubtitlesResponse(val subtitles: List<Subtitle> = emptyList())
+
 @Serializable data class CatalogResponse(val metas: List<MetaPreview> = emptyList())
 @Serializable data class MetaResponse(val meta: Meta? = null)
 @Serializable data class StreamResponse(val streams: List<Stream> = emptyList())
