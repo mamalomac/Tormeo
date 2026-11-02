@@ -63,6 +63,16 @@ Install on a TV: `adb install app-tv-release.apk`, or copy it to a USB stick and
 * The ⚙ button in the player: audio track, subtitles, speed.
 * Long-press on an item in "Nastavi gledanje" (Continue watching) opens the movie/series details.
 
+## Subtitles (OpenSubtitles)
+
+* The OpenSubtitles v3 addon is installed by default.
+* **Settings → Titlovi:** pick a language (e.g. *srpski*) and the best subtitle is loaded automatically before playback.
+  Order: Serbian ↔ Croatian ↔ Bosnian (the best-synced one wins), then English.
+* Ranking: release-name match, same FPS as the video (a 25 fps subtitle drifts on a 23.976 fps film), CAM/TS subtitles last.
+* In the player: the **CC Titlovi** button (shown with the controls) or the **MENU / CC** remote key → list of all subtitles or "Bez titla".
+* Windows-1250/1251 encodings and old MicroDVD `.sub` files are converted automatically. A broken subtitle is dropped and the movie keeps playing.
+* Subtitles embedded in MKV files are still available via the player's ⚙ button.
+
 ## Addons
 
 Cinemeta (catalogs, search, metadata) and Torrentio (sources) are installed by default. Any Stremio addon
