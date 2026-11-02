@@ -35,7 +35,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -44,6 +46,7 @@ import androidx.media3.ui.PlayerView
 import com.tormeo.app.TormeoApp
 import com.tormeo.app.data.PlayRequest
 import com.tormeo.app.data.StremioJson
+import com.tormeo.app.diag.Diagnostics
 import com.tormeo.app.torrent.ByteSource
 import com.tormeo.app.torrent.HttpSource
 import com.tormeo.app.torrent.TorrentSource
@@ -85,6 +88,12 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         req = StremioJson.decodeFromString(PlayRequest.serializer(), intent.getStringExtra(EXTRA_REQUEST)!!)
+        Diagnostics.playerStarted()
+        Diagnostics.log(
+            "PLAY ${req.title} ${req.subtitle ?: ""} | " +
+                (if (req.infoHash != null) "torrent ${req.infoHash} idx=${req.fileIdx}" else "url ${req.url?.take(60)}") +
+                " | ${req.filename ?: ""} | size=${req.sizeBytes?.let { it shr 20 }}MB bitrate=${req.bitrateBps?.let { it / 1_000_000 }}Mbps",
+        )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (Build.VERSION.SDK_INT >= 28) {
             window.attributes = window.attributes.apply {
@@ -204,11 +213,13 @@ class PlayerActivity : ComponentActivity() {
                     url = req.url ?: error("Nema linka")
                     headers = req.headers
                 }
+                Diagnostics.log("source ready (${src?.javaClass?.simpleName ?: "direct"}), length=${src?.length?.let { it shr 20 }}MB")
                 setStatus("Pokrećem plejer…")
                 startPlayer(url, headers, local = src != null)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                Diagnostics.error("prepare failed", e)
                 showError(e.message ?: e.javaClass.simpleName)
             }
         }
@@ -223,11 +234,13 @@ class PlayerActivity : ComponentActivity() {
                 setStatus(if (st.hasMetadata) "Metapodaci primljeni" else "Tražim peer-ove… ${st.peers} povezano · ${speed(st.downloadRate)}")
             }
             source = ts
+            Diagnostics.log("torrent file '${ts.fileName}' ${ts.length shr 20}MB")
             val bytes = (bytesPerSec * prebufferSec).coerceIn(8L shl 20, 400L shl 20)
             ts.prebuffer(bytes) { f ->
                 val st = ts.status()
                 setStatus("Baferovanje ${(f * 100).toInt()}% · ${st.peers} peer-ova · ${speed(st.downloadRate)}", f)
             }
+            Diagnostics.log("torrent prebuffer done (${bytes shr 20}MB)")
             return ts
         }
         val url = req.url ?: error("Stream nema link")
@@ -239,7 +252,9 @@ class PlayerActivity : ComponentActivity() {
             ?: return null
         source = hs
         val bytes = (bytesPerSec * prebufferSec / 2).coerceIn(4L shl 20, 200L shl 20)
+        Diagnostics.log("http source ${hs.length shr 20}MB ${hs.mimeType}")
         hs.prebuffer(bytes) { f -> setStatus("Baferovanje ${(f * 100).toInt()}% · ${speed(hs.downloadRate)}", f) }
+        Diagnostics.log("http prebuffer done")
         return hs
     }
 
@@ -297,6 +312,8 @@ class PlayerActivity : ComponentActivity() {
             .build()
         if (settings.matchFrameRate) p.setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
         p.addListener(listener)
+        p.addAnalyticsListener(analytics)
+        Diagnostics.log("player created: tunneling=${settings.tunneling && !triedWithoutTunneling} ffmpegAudio=${settings.ffmpegAudio} buffer=${caps.playerBufferBytes shr 20}MB local=$local")
         player = p
         playerView.player = p
         p.setMediaItem(MediaItem.fromUri(url), resumeFrom)
@@ -309,6 +326,7 @@ class PlayerActivity : ComponentActivity() {
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
+            Diagnostics.log("state ${when (state) { Player.STATE_IDLE -> "IDLE"; Player.STATE_BUFFERING -> "BUFFERING"; Player.STATE_READY -> "READY"; else -> "ENDED" }} pos=${player?.currentPosition}")
             when (state) {
                 Player.STATE_READY -> {
                     ioRetries = 0
@@ -316,8 +334,15 @@ class PlayerActivity : ComponentActivity() {
                     bufferText.visibility = View.GONE
                 }
                 Player.STATE_ENDED -> {
-                    app.progress.remove(req.videoId)
-                    finish()
+                    val p = player
+                    val dur = p?.duration ?: 0
+                    if (p != null && dur > 0 && p.currentPosition < dur - 120_000) {
+                        // ended long before the real end → the stream broke off, don't silently close
+                        showError("Strim se neočekivano prekinuo na ${fmtTime(p.currentPosition)}")
+                    } else {
+                        app.progress.remove(req.videoId)
+                        finish()
+                    }
                 }
                 else -> Unit
             }
@@ -328,6 +353,7 @@ class PlayerActivity : ComponentActivity() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            Diagnostics.log("player error ${error.errorCodeName}: ${error.message} / cause: ${error.cause}")
             val p = player ?: return
             val decoderProblem = error.errorCode in listOf(
                 PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
@@ -340,6 +366,7 @@ class PlayerActivity : ComponentActivity() {
             // Some TV firmwares advertise tunneling but break with it – retry once without.
             if (decoderProblem && app.settings.tunneling && !triedWithoutTunneling) {
                 triedWithoutTunneling = true
+                Diagnostics.log("retrying without tunneling")
                 trackSelector?.let { it.parameters = it.buildUponParameters().setTunnelingEnabled(false).build() }
                 p.prepare()
                 p.playWhenReady = true
@@ -353,6 +380,24 @@ class PlayerActivity : ComponentActivity() {
                 return
             }
             showError("${error.errorCodeName}: ${error.message}")
+        }
+    }
+
+    private val analytics = object : AnalyticsListener {
+        override fun onVideoDecoderInitialized(t: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+            Diagnostics.log("video decoder: $decoderName")
+        }
+        override fun onAudioDecoderInitialized(t: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+            Diagnostics.log("audio decoder: $decoderName")
+        }
+        override fun onVideoInputFormatChanged(t: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+            Diagnostics.log("video ${format.sampleMimeType} ${format.codecs ?: ""} ${format.width}x${format.height} ${format.frameRate}fps ${format.colorInfo?.toLogString() ?: "SDR"}")
+        }
+        override fun onAudioInputFormatChanged(t: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+            Diagnostics.log("audio ${format.sampleMimeType} ${format.channelCount}ch ${format.language ?: ""}")
+        }
+        override fun onDroppedVideoFrames(t: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+            Diagnostics.log("dropped $droppedFrames frames in ${elapsedMs}ms")
         }
     }
 
@@ -378,6 +423,7 @@ class PlayerActivity : ComponentActivity() {
         }
         val best = pool.mapNotNull { m -> score(m.refreshRate)?.let { m to it } }.minByOrNull { it.second }?.first ?: return
         if (best.modeId != cur.modeId) {
+            Diagnostics.log("display mode ${cur.physicalWidth}x${cur.physicalHeight}@${cur.refreshRate} -> ${best.physicalWidth}x${best.physicalHeight}@${best.refreshRate} (video ${fps}fps)")
             window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
         }
     }
@@ -452,6 +498,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        Diagnostics.log("player onStop (finishing=$isFinishing)")
         saveProgress()
         // Free decoder, network and torrent resources as soon as we leave – weak devices need them back.
         if (!isChangingConfigurations) finish()
@@ -460,6 +507,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         releaseAll()
+        Diagnostics.log("player closed")
+        Diagnostics.playerEnded()
         if (Build.VERSION.SDK_INT >= 23) {
             window.attributes = window.attributes.apply { preferredDisplayModeId = 0 }
         }

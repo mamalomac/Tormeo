@@ -15,6 +15,7 @@ import com.tormeo.app.data.AddonRepository
 import com.tormeo.app.data.Settings
 import com.tormeo.app.data.WatchProgressStore
 import com.tormeo.app.device.DeviceCaps
+import com.tormeo.app.diag.Diagnostics
 import com.tormeo.app.torrent.StreamServer
 import com.tormeo.app.torrent.TorrentConfig
 import com.tormeo.app.torrent.TorrentEngine
@@ -53,6 +54,7 @@ class TormeoApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        Diagnostics.init(this)
         http = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

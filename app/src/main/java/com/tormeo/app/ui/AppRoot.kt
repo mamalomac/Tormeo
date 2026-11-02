@@ -6,9 +6,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import com.tormeo.app.diag.Diagnostics
 
 /** Minimal back-stack navigation (no extra navigation library – keeps the APK small). */
 sealed class Screen(val key: String) {
@@ -41,6 +45,8 @@ fun AppRoot() {
     val nav = remember { Navigator(stack) }
     val holder = rememberSaveableStateHolder()
     BackHandler(enabled = stack.size > 1) { nav.back() }
+    var crashReport by remember { mutableStateOf(Diagnostics.takePendingReport()) }
+    crashReport?.let { CrashReportDialog(it) { crashReport = null } }
 
     Box(Modifier.fillMaxSize().background(Bg)) {
         val screen = stack.last()

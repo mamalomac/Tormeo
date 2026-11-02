@@ -80,6 +80,11 @@ class HttpSource private constructor(
                 }
                 try { Thread.sleep(minOf(400L * failures, 4000L)) } catch (_: InterruptedException) { }
             } catch (_: InterruptedException) {
+            } catch (e: Throwable) {
+                if (closed) break
+                error = IOException(e.message ?: e.javaClass.simpleName, e)
+                synchronized(lock) { lock.notifyAll() }
+                try { Thread.sleep(2000) } catch (_: InterruptedException) { }
             }
         }
     }

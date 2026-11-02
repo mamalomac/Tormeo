@@ -130,8 +130,9 @@ class StreamServer {
                 // usually the client closed the connection (seek / stop) – log anything else
                 val m = e.message.orEmpty()
                 if ("cancelled" !in m && "closed" !in m && "Broken pipe" !in m && "reset" !in m) Log.w(TAG, "stream read failed", e)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "stream error", e)
+                com.tormeo.app.diag.Diagnostics.error("stream server", e)
             }
         }
     }

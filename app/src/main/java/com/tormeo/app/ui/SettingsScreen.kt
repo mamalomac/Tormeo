@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tormeo.app.BuildConfig
 import com.tormeo.app.TormeoApp
+import com.tormeo.app.diag.Diagnostics
 import com.tormeo.app.stream.StreamCandidate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,6 +47,8 @@ fun SettingsScreen() {
     var newUrl by remember { mutableStateOf("") }
     var installMsg by remember { mutableStateOf<String?>(null) }
     var cacheMsg by remember { mutableStateOf<String?>(null) }
+    var lastReport by remember { mutableStateOf<String?>(null) }
+    lastReport?.let { CrashReportDialog(it) { lastReport = null } }
 
     fun <T> cycle(options: List<T>, current: T): T = options[(options.indexOf(current) + 1).mod(options.size)]
     fun changed() { tick++ }
@@ -158,6 +161,9 @@ fun SettingsScreen() {
                         Text(k, color = TextDim, fontSize = 14.sp)
                         Text(v, fontSize = 14.sp)
                     }
+                }
+                Row(Modifier.padding(top = 12.dp)) {
+                    TvButton("Poslednji izveštaj o grešci") { lastReport = Diagnostics.lastReport() ?: "Nema zabeleženih grešaka." }
                 }
                 Text("Tormeo ${BuildConfig.VERSION_NAME}", color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 16.dp))
             }

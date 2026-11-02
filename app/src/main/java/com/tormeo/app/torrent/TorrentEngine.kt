@@ -88,7 +88,10 @@ class TorrentEngine(private val saveRoot: File, private val config: () -> Torren
         sp.setInteger(settings_pack.int_types.mixed_mode_algorithm.swigValue(), 0) // prefer TCP for throughput
         sp.setInteger(settings_pack.int_types.alert_queue_size.swigValue(), 2000)
         sm.addListener(listener)
-        sm.start(SessionParams(sp))
+        // Plain file I/O instead of libtorrent's default memory-mapped storage (used on 64-bit):
+        // mmap on Android app storage (FUSE on Android 11+) can crash with SIGBUS, and mapped pages
+        // count against the app's memory so the system kills it during playback.
+        sm.start(SessionParams(sp).apply { setPosixDiskIO() })
         // SessionManager enables every alert category; keep only what we use to save CPU on weak SoCs.
         val mask = alert.error_notification.or_(alert.status_notification).or_(alert.storage_notification)
             .or_(alert.piece_progress_notification)
