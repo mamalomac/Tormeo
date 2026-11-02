@@ -29,8 +29,9 @@ jobs:
         run: |
           VER="${GITHUB_REF_NAME//\//-}"
           mkdir -p dist
-          cp app/build/outputs/apk/tv/release/*.apk "dist/Tormeo-TV-armeabi-v7a-$VER.apk"
-          cp app/build/outputs/apk/mobile/release/*.apk "dist/Tormeo-Mobile-$VER.apk"
+          # Fixed names so https://github.com/<owner>/<repo>/releases/latest/download/Tormeo-TV.apk always works
+          cp app/build/outputs/apk/tv/release/*.apk dist/Tormeo-TV.apk
+          cp app/build/outputs/apk/mobile/release/*.apk dist/Tormeo-Mobile.apk
           ls -la dist
       - uses: actions/upload-artifact@v7
         with:
@@ -43,5 +44,5 @@ jobs:
           files: dist/*.apk
           generate_release_notes: true
           body: |
-            **Tormeo-TV-armeabi-v7a** – Android TV / TV boksovi (Android 6.0+)
-            **Tormeo-Mobile** – telefoni i tableti (Android 6.0+)
+            **Tormeo-TV.apk** – Android TV (armeabi-v7a) / TV boksovi (Android 6.0+)
+            **Tormeo-Mobile.apk** – telefoni i tableti (Android 6.0+)
